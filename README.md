@@ -154,4 +154,4 @@ phantomhash/
 
 ---
 
-*Day 2 of the Phantom Security toolkit. Next up: PhantomCheck (password strength + breach checker).*
+
