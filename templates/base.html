@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}PhantomHash{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<canvas id="matrix-bg"></canvas>
+<div id="toast-container"></div>
+
+<div class="page-shell">
+  <header class="site-header">
+    <div class="brand-mark"><i class="fa-solid fa-hashtag"></i></div>
+    <div class="brand-text">
+      <span class="brand-name">PHANTOM<span class="accent">HASH</span></span>
+      <span class="brand-sub">FILE INTEGRITY & HASH ANALYSIS PLATFORM</span>
+    </div>
+  </header>
+
+  <nav class="nav-tabs">
+    <a href="/"         class="nav-tab {{ 'active' if active=='hash' }}">
+      <i class="fa-solid fa-file-shield"></i><span>Hash File / Text</span>
+    </a>
+    <a href="/compare"  class="nav-tab {{ 'active' if active=='compare' }}">
+      <i class="fa-solid fa-code-compare"></i><span>Compare Files</span>
+    </a>
+    <a href="/verify"   class="nav-tab {{ 'active' if active=='verify' }}">
+      <i class="fa-solid fa-circle-check"></i><span>Verify Hash</span>
+    </a>
+    <a href="/manifest" class="nav-tab {{ 'active' if active=='manifest' }}">
+      <i class="fa-solid fa-clipboard-list"></i><span>Manifest</span>
+    </a>
+  </nav>
+
+  {% block content %}{% endblock %}
+</div>
+
+<script src="{{ url_for('static', filename='js/matrix.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

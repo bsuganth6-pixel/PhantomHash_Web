@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Hash File / Text — PhantomHash{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="card-title"><i class="fa-solid fa-file-shield"></i> Hash a File</div>
+
+  <div class="drop-zone" id="fileZone">
+    <input type="file" id="fileInput">
+    <div id="fileLabel">
+      <div class="drop-icon"><i class="fa-solid fa-upload"></i></div>
+      <div class="drop-label">
+        <strong>Drop a file here</strong> or click to browse
+        <div class="drop-hint">Any file type · Up to 500 MB</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="field">
+    <label>Algorithms</label>
+    <div style="display:flex; flex-wrap:wrap; gap:10px">
+      <label class="checkbox-row"><input type="checkbox" class="algo-chk" value="md5"     checked> MD5</label>
+      <label class="checkbox-row"><input type="checkbox" class="algo-chk" value="sha1"    checked> SHA-1</label>
+      <label class="checkbox-row"><input type="checkbox" class="algo-chk" value="sha256"  checked> SHA-256</label>
+      <label class="checkbox-row"><input type="checkbox" class="algo-chk" value="sha512"  checked> SHA-512</label>
+      <label class="checkbox-row"><input type="checkbox" class="algo-chk" value="blake2b" checked> BLAKE2b</label>
+      <label class="checkbox-row"><input type="checkbox" class="algo-chk" value="crc32"   checked> CRC32</label>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="hashFileBtn" onclick="hashFile()">
+      <i class="fa-solid fa-hashtag"></i> Hash File
+    </button>
+    <div class="loader" id="fileLoader"><div class="spinner"></div> Computing hashes…</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title"><i class="fa-solid fa-font"></i> Hash Text / String</div>
+  <div class="field">
+    <label>Paste any text or string</label>
+    <textarea id="textInput" rows="4" placeholder="Enter text to hash — useful for verifying passwords, tokens, or any string value…"></textarea>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-primary" id="hashTextBtn" onclick="hashText()">
+      <i class="fa-solid fa-hashtag"></i> Hash Text
+    </button>
+    <div class="loader" id="textLoader"><div class="spinner"></div> Hashing…</div>
+  </div>
+</div>
+
+<div id="results"></div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+PH.initDropZone("fileZone", "fileInput", "fileLabel");
+
+async function hashFile() {
+  const input = document.getElementById("fileInput");
+  if (!input.files.length) { PH.toast("Select a file first.", "error"); return; }
+
+  const algos = [...document.querySelectorAll(".algo-chk:checked")].map(c => c.value);
+  if (!algos.length) { PH.toast("Select at least one algorithm.", "error"); return; }
+
+  const btn = document.getElementById("hashFileBtn");
+  const loader = document.getElementById("fileLoader");
+  PH.setLoading(loader, btn, true);
+
+  const fd = new FormData();
+  fd.append("file", input.files[0]);
+  algos.forEach(a => fd.append("algorithms", a));
+
+  const r = await PH.postForm("/api/hash/file", fd);
+  PH.setLoading(loader, btn, false);
+
+  if (r.error) { PH.toast(r.error, "error"); return; }
+  renderHashResult(r);
+}
+
+async function hashText() {
+  const text = document.getElementById("textInput").value.trim();
+  if (!text) { PH.toast("Enter some text first.", "error"); return; }
+
+  const btn = document.getElementById("hashTextBtn");
+  const loader = document.getElementById("textLoader");
+  PH.setLoading(loader, btn, true);
+
+  const r = await PH.postJSON("/api/hash/text", { text });
+  PH.setLoading(loader, btn, false);
+
+  if (r.error) { PH.toast(r.error, "error"); return; }
+  renderTextResult(r);
+}
+
+function renderHashResult(r) {
+  const rows = Object.entries(r.hashes).map(([algo, val]) => PH.hashRow(algo, val)).join("");
+  document.getElementById("results").innerHTML = `
+    <div class="card result-block">
+      <div class="card-title"><i class="fa-solid fa-table"></i> Hash Results</div>
+      ${PH.renderMeta(r)}
+      <table class="hash-table">
+        <thead><tr><th>Algorithm</th><th>Hash Value</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${PH.renderEntropy(r.entropy)}
+    </div>`;
+}
+
+function renderTextResult(r) {
+  const rows = Object.entries(r.hashes).map(([algo, val]) => PH.hashRow(algo, val)).join("");
+  document.getElementById("results").innerHTML = `
+    <div class="card result-block">
+      <div class="card-title"><i class="fa-solid fa-table"></i> Text Hash Results</div>
+      <div class="file-meta">
+        <div class="meta-pill"><i class="fa-solid fa-font"></i><span>Input</span><strong>${PH.esc(r.input_text)}</strong></div>
+        <div class="meta-pill"><i class="fa-solid fa-weight-hanging"></i><span>Bytes</span><strong>${r.byte_length}</strong></div>
+        <div class="meta-pill"><i class="fa-solid fa-gauge"></i><span>Entropy</span><strong>${r.entropy} / 8.0</strong></div>
+      </div>
+      <table class="hash-table">
+        <thead><tr><th>Algorithm</th><th>Hash Value</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Manifest — PhantomHash{% endblock %}
+{% block content %}
+
+<!-- Tab switcher inside the page -->
+<div style="display:flex;gap:8px;margin-bottom:20px">
+  <button class="btn btn-primary btn-sm" id="tabGenBtn"    onclick="switchTab('gen')">
+    <i class="fa-solid fa-file-export"></i> Generate Manifest
+  </button>
+  <button class="btn btn-secondary btn-sm" id="tabVerifyBtn" onclick="switchTab('verify')">
+    <i class="fa-solid fa-file-import"></i> Verify Against Manifest
+  </button>
+</div>
+
+<!-- ── GENERATE ── -->
+<div id="tabGen">
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-file-export"></i> Generate Integrity Manifest</div>
+    <p style="color:var(--text-mid);font-size:13px;margin-bottom:18px">
+      Upload multiple files and generate a manifest containing their SHA-256, MD5, and SHA-512 hashes.
+      Save the manifest file as your trusted baseline — verify against it later to detect tampering.
+    </p>
+
+    <div class="drop-zone" id="genZone">
+      <input type="file" id="genFiles" multiple>
+      <div id="genLabel">
+        <div class="drop-icon"><i class="fa-solid fa-files"></i></div>
+        <div class="drop-label">
+          <strong>Drop files here</strong> or click to browse
+          <div class="drop-hint">Multiple files supported — hold Ctrl/Cmd to select many</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Manifest Label (optional)</label>
+      <input type="text" id="manifestLabel" placeholder="e.g. MyApp v2.1.0 Release — 2026-07-02">
+    </div>
+
+    <div class="field">
+      <label>Output Format</label>
+      <div style="display:flex;gap:16px">
+        <label class="checkbox-row"><input type="radio" name="fmt" value="json"   checked> JSON (rich metadata, machine-readable)</label>
+        <label class="checkbox-row"><input type="radio" name="fmt" value="sha256"> SHA256SUM (compatible with <code>sha256sum --check</code>)</label>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="genBtn" onclick="generateManifest()">
+        <i class="fa-solid fa-file-export"></i> Generate Manifest
+      </button>
+      <div class="loader" id="genLoader"><div class="spinner"></div> Hashing all files…</div>
+    </div>
+  </div>
+  <div id="genResults"></div>
+</div>
+
+<!-- ── VERIFY ── -->
+<div id="tabVerify" style="display:none">
+  <div class="card">
+    <div class="card-title"><i class="fa-solid fa-file-import"></i> Verify Files Against a Manifest</div>
+    <p style="color:var(--text-mid);font-size:13px;margin-bottom:18px">
+      Upload a previously generated JSON manifest plus the actual files.
+      PhantomHash will re-hash every file and compare against the manifest — showing which files are OK, modified, or missing.
+    </p>
+
+    <div class="field">
+      <label>Manifest File (.json)</label>
+      <div class="drop-zone" id="mfZone">
+        <input type="file" id="mfFile" accept=".json">
+        <div id="mfLabel">
+          <div class="drop-icon"><i class="fa-solid fa-file-code"></i></div>
+          <div class="drop-label"><strong>Drop manifest.json</strong> or click to browse</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Files to Verify</label>
+      <div class="drop-zone" id="verifyFilesZone">
+        <input type="file" id="verifyFiles" multiple>
+        <div id="verifyFilesLabel">
+          <div class="drop-icon"><i class="fa-solid fa-files"></i></div>
+          <div class="drop-label">
+            <strong>Drop the actual files</strong> or click to browse
+            <div class="drop-hint">Upload ALL the files that were in the original manifest</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="verifyMfBtn" onclick="verifyManifest()">
+        <i class="fa-solid fa-shield-check"></i> Verify Integrity
+      </button>
+      <div class="loader" id="verifyMfLoader"><div class="spinner"></div> Verifying all files…</div>
+    </div>
+  </div>
+  <div id="verifyResults"></div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+PH.initDropZone("genZone", "genFiles", "genLabel", true);
+PH.initDropZone("mfZone", "mfFile", "mfLabel", false);
+PH.initDropZone("verifyFilesZone", "verifyFiles", "verifyFilesLabel", true);
+
+function switchTab(tab) {
+  document.getElementById("tabGen").style.display    = tab === "gen"    ? "" : "none";
+  document.getElementById("tabVerify").style.display = tab === "verify" ? "" : "none";
+  document.getElementById("tabGenBtn").className    = `btn btn-sm ${tab==="gen"    ? "btn-primary" : "btn-secondary"}`;
+  document.getElementById("tabVerifyBtn").className = `btn btn-sm ${tab==="verify" ? "btn-primary" : "btn-secondary"}`;
+}
+
+async function generateManifest() {
+  const files = document.getElementById("genFiles").files;
+  if (!files.length) { PH.toast("Select at least one file.", "error"); return; }
+
+  const label = document.getElementById("manifestLabel").value.trim() || "PhantomHash Manifest";
+  const fmt   = document.querySelector('input[name="fmt"]:checked').value;
+
+  const btn    = document.getElementById("genBtn");
+  const loader = document.getElementById("genLoader");
+  PH.setLoading(loader, btn, true);
+
+  const fd = new FormData();
+  [...files].forEach(f => fd.append("files", f));
+  fd.append("label", label);
+  fd.append("format", fmt);
+
+  const r = await PH.postForm("/api/manifest/create", fd);
+  PH.setLoading(loader, btn, false);
+
+  if (r.error) { PH.toast(r.error, "error"); return; }
+  renderGenResult(r, label, fmt);
+}
+
+function renderGenResult(r, label, fmt) {
+  const mf = r.manifest;
+  const fileCount = Object.keys(mf.entries).length;
+  const errCount  = mf.errors ? mf.errors.length : 0;
+
+  let entriesHtml = Object.entries(mf.entries).map(([name, info]) => `
+    <div class="diff-row ok" style="flex-direction:column;gap:4px">
+      <div class="diff-path"><i class="fa-solid fa-file" style="color:var(--cyan);margin-right:8px"></i>${PH.esc(name)}</div>
+      <div class="diff-meta">
+        SHA-256: ${PH.esc(info.sha256.slice(0,32))}… · ${PH.esc(info.size_human)} · ${PH.esc(info.filetype)}
+        <button class="btn btn-secondary btn-sm" style="margin-left:8px;padding:2px 8px;font-size:10px"
+                onclick="PH.copy('${PH.esc(info.sha256)}','SHA-256')">Copy hash</button>
+      </div>
+    </div>`).join("");
+
+  document.getElementById("genResults").innerHTML = `
+    <div class="card result-block">
+      <div class="card-title"><i class="fa-solid fa-clipboard-check"></i> Manifest Generated</div>
+
+      <div class="stat-row">
+        <div class="stat-box green"><span class="num">${fileCount}</span><span class="lbl">Files Hashed</span></div>
+        <div class="stat-box ${errCount > 0 ? "red" : "neutral"}"><span class="num">${errCount}</span><span class="lbl">Errors</span></div>
+        <div class="stat-box neutral"><span class="num">${fmt.toUpperCase()}</span><span class="lbl">Format</span></div>
+      </div>
+
+      ${entriesHtml}
+
+      <div style="margin-top:16px">
+        <div class="card-title" style="margin-bottom:10px"><i class="fa-solid fa-code"></i> Manifest Content (click to select all)</div>
+        <div class="code-preview" onclick="selectAll(this)">${PH.esc(r.content)}</div>
+      </div>
+
+      <div class="btn-row" style="margin-top:14px">
+        <button class="btn btn-primary btn-sm" onclick="downloadManifest(${JSON.stringify(r.content).replace(/</g,'&lt;')}, '${PH.esc(label.replace(/\s+/g,"-"))}', '${fmt}')">
+          <i class="fa-solid fa-download"></i> Download Manifest
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="PH.copy(${JSON.stringify(r.content)}, 'Manifest')">
+          <i class="fa-solid fa-copy"></i> Copy to Clipboard
+        </button>
+      </div>
+    </div>`;
+}
+
+function selectAll(el) {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  window.getSelection().removeAllRanges();
+  window.getSelection().addRange(range);
+}
+
+function downloadManifest(content, label, fmt) {
+  const ext  = fmt === "sha256" ? ".sha256sums" : ".json";
+  const mime = fmt === "sha256" ? "text/plain" : "application/json";
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `phantom-manifest-${label}${ext}`;
+  a.click();
+}
+
+async function verifyManifest() {
+  const mf    = document.getElementById("mfFile").files;
+  const files = document.getElementById("verifyFiles").files;
+  if (!mf.length)    { PH.toast("Upload the manifest .json file.", "error"); return; }
+  if (!files.length) { PH.toast("Upload the files to verify.", "error"); return; }
+
+  const btn    = document.getElementById("verifyMfBtn");
+  const loader = document.getElementById("verifyMfLoader");
+  PH.setLoading(loader, btn, true);
+
+  const fd = new FormData();
+  fd.append("manifest", mf[0]);
+  [...files].forEach(f => fd.append("files", f));
+
+  const r = await PH.postForm("/api/manifest/verify", fd);
+  PH.setLoading(loader, btn, false);
+
+  if (r.error) { PH.toast(r.error, "error"); return; }
+  renderVerifyResult(r);
+}
+
+function renderVerifyResult(r) {
+  const s = r.summary;
+  const isClean = s.verdict === "CLEAN";
+  const cls = isClean ? "clean" : "tampered";
+  const col = isClean ? "var(--green)" : "var(--red)";
+
+  let okHtml = r.ok.map(e => `
+    <div class="diff-row ok">
+      <i class="fa-solid fa-circle-check" style="color:var(--green);margin-top:2px"></i>
+      <div><div class="diff-path">${PH.esc(e.path)}</div>
+      <div class="diff-meta">${PH.esc(e.sha256)}</div></div>
+    </div>`).join("");
+
+  let modHtml = r.modified.map(e => `
+    <div class="diff-row changed">
+      <i class="fa-solid fa-triangle-exclamation" style="color:var(--yellow);margin-top:2px"></i>
+      <div><div class="diff-path">${PH.esc(e.path)}</div>
+      <div class="diff-meta">Expected: ${PH.esc(e.expected_sha256.slice(0,32))}…</div>
+      <div class="diff-meta" style="color:var(--red)">Got:      ${PH.esc(e.actual_sha256.slice(0,32))}…</div></div>
+    </div>`).join("");
+
+  let missingHtml = r.missing.map(e => `
+    <div class="diff-row removed">
+      <i class="fa-solid fa-circle-xmark" style="color:var(--red);margin-top:2px"></i>
+      <div><div class="diff-path">${PH.esc(e.path)}</div>
+      <div class="diff-meta">File not found / not uploaded</div></div>
+    </div>`).join("");
+
+  document.getElementById("verifyResults").innerHTML = `
+    <div class="card result-block">
+      <div class="verdict-banner ${cls}">
+        <div class="verdict-icon">
+          <i class="fa-solid fa-${isClean ? "shield-check" : "shield-exclamation"}" style="color:${col}"></i>
+        </div>
+        <div class="verdict-text">
+          <h3 style="color:${col}">${s.verdict}</h3>
+          <p>${s.ok} OK · ${s.modified} Modified · ${s.missing} Missing · ${s.total_checked} Total</p>
+        </div>
+      </div>
+
+      <div class="stat-row">
+        <div class="stat-box green"><span class="num">${s.ok}</span><span class="lbl">OK</span></div>
+        <div class="stat-box ${s.modified > 0 ? "red" : "neutral"}"><span class="num">${s.modified}</span><span class="lbl">Modified</span></div>
+        <div class="stat-box ${s.missing  > 0 ? "red" : "neutral"}"><span class="num">${s.missing}</span><span class="lbl">Missing</span></div>
+        <div class="stat-box neutral"><span class="num">${s.not_in_manifest || 0}</span><span class="lbl">Extra Files</span></div>
+      </div>
+
+      ${modHtml    ? `<div class="diff-section"><h4 style="color:var(--yellow)"><i class="fa-solid fa-triangle-exclamation"></i> Modified</h4>${modHtml}</div>` : ""}
+      ${missingHtml? `<div class="diff-section"><h4 style="color:var(--red)"><i class="fa-solid fa-circle-xmark"></i> Missing</h4>${missingHtml}</div>` : ""}
+      ${okHtml     ? `<div class="diff-section"><h4 style="color:var(--green)"><i class="fa-solid fa-circle-check"></i> Verified OK</h4>${okHtml}</div>` : ""}
+    </div>`;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Verify Hash — PhantomHash{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="card-title"><i class="fa-solid fa-circle-check"></i> Verify File Against a Known Hash</div>
+  <p style="color:var(--text-mid);font-size:13px;margin-bottom:20px">
+    Paste the hash from a trusted source (download page, official docs, email), upload the file,
+    and PhantomHash will tell you if they match. Algorithm is auto-detected from hash length.
+  </p>
+
+  <div class="field">
+    <label>Known Hash (from trusted source)</label>
+    <input type="text" id="knownHash" placeholder="Paste MD5 / SHA-1 / SHA-256 / SHA-512 hash here…"
+           style="font-family:var(--font-mono);letter-spacing:0.3px">
+    <div id="algoDetect" style="margin-top:6px;font-size:11.5px;color:var(--text-low);font-family:var(--font-mono)"></div>
+  </div>
+
+  <div class="drop-zone" id="verifyZone">
+    <input type="file" id="verifyFile">
+    <div id="verifyLabel">
+      <div class="drop-icon"><i class="fa-solid fa-file-circle-question"></i></div>
+      <div class="drop-label">
+        <strong>Drop the file to verify</strong> or click to browse
+        <div class="drop-hint">The file whose hash you want to confirm</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="verifyBtn" onclick="verifyHash()">
+      <i class="fa-solid fa-shield-check"></i> Verify Integrity
+    </button>
+    <div class="loader" id="verifyLoader"><div class="spinner"></div> Hashing file and comparing…</div>
+  </div>
+</div>
+
+<div id="results"></div>
+
+<!-- Quick reference card -->
+<div class="card">
+  <div class="card-title"><i class="fa-solid fa-circle-info"></i> Hash Length Reference</div>
+  <table class="hash-table">
+    <thead><tr><th>Algorithm</th><th>Hash Length</th><th>Security</th><th>Common Use</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="algo-name">MD5</td>
+        <td><span class="hash-value" style="font-size:12px">32 hex chars</span></td>
+        <td><span style="color:var(--red)">Broken — collision attacks exist</span></td>
+        <td>Legacy checksums, non-security uses</td>
+      </tr>
+      <tr>
+        <td class="algo-name">SHA-1</td>
+        <td><span class="hash-value" style="font-size:12px">40 hex chars</span></td>
+        <td><span style="color:var(--yellow)">Deprecated — SHAttered collision (2017)</span></td>
+        <td>Legacy git objects, TLS cert chains</td>
+      </tr>
+      <tr>
+        <td class="algo-name">SHA-256</td>
+        <td><span class="hash-value" style="font-size:12px">64 hex chars</span></td>
+        <td><span style="color:var(--green)">Current standard — recommended</span></td>
+        <td>Software downloads, code signing, TLS</td>
+      </tr>
+      <tr>
+        <td class="algo-name">SHA-512</td>
+        <td><span class="hash-value" style="font-size:12px">128 hex chars</span></td>
+        <td><span style="color:var(--green)">Strong — larger margin than SHA-256</span></td>
+        <td>High-security contexts, password hashing</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+PH.initDropZone("verifyZone", "verifyFile", "verifyLabel");
+
+const algoMap = {32:"MD5 (32 chars)", 40:"SHA-1 (40 chars)", 64:"SHA-256 (64 chars)", 128:"SHA-512 (128 chars)"};
+document.getElementById("knownHash").addEventListener("input", function() {
+  const len = this.value.trim().length;
+  const el = document.getElementById("algoDetect");
+  const valid = /^[0-9a-fA-F]+$/.test(this.value.trim());
+  if (!this.value.trim()) { el.textContent = ""; return; }
+  if (!valid) { el.style.color = "var(--red)"; el.textContent = "⚠ Contains non-hex characters"; return; }
+  el.style.color = "var(--cyan)";
+  el.textContent = algoMap[len] ? `✓ Detected: ${algoMap[len]}` : `⚠ Unrecognised length (${len} chars) — supported: 32, 40, 64, 128`;
+});
+
+async function verifyHash() {
+  const hash = document.getElementById("knownHash").value.trim().toLowerCase();
+  const file = document.getElementById("verifyFile");
+
+  if (!hash) { PH.toast("Paste a known hash first.", "error"); return; }
+  if (!file.files.length) { PH.toast("Select the file to verify.", "error"); return; }
+
+  const btn = document.getElementById("verifyBtn");
+  const loader = document.getElementById("verifyLoader");
+  PH.setLoading(loader, btn, true);
+
+  const fd = new FormData();
+  fd.append("file", file.files[0]);
+  fd.append("known_hash", hash);
+
+  const r = await PH.postForm("/api/verify", fd);
+  PH.setLoading(loader, btn, false);
+
+  if (r.error) { PH.toast(r.error, "error"); return; }
+  render(r);
+}
+
+function render(r) {
+  const cls = r.match ? "match" : "mismatch";
+  const icon = r.match ? "circle-check" : "circle-xmark";
+  const col  = r.match ? "var(--green)" : "var(--red)";
+
+  document.getElementById("results").innerHTML = `
+    <div class="card result-block">
+      <div class="verdict-banner ${cls}">
+        <div class="verdict-icon"><i class="fa-solid fa-${icon}" style="color:${col}"></i></div>
+        <div class="verdict-text">
+          <h3 style="color:${col}">${PH.esc(r.verdict)}</h3>
+          <p>${PH.esc(r.filename)} · ${PH.esc(r.size_human)} · Algorithm: ${PH.esc(r.algorithm)}</p>
+        </div>
+      </div>
+
+      <table class="hash-table">
+        <thead><tr><th>Source</th><th>${PH.esc(r.algorithm)} Hash</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="algo-name">Known (trusted source)</div></td>
+            <td><div class="hash-value">${PH.esc(r.known_hash)}</div></td>
+            <td></td>
+          </tr>
+          <tr>
+            <td><div class="algo-name">Computed (from file)</div></td>
+            <td><div class="hash-value" style="color:${col}">${PH.esc(r.computed_hash)}</div></td>
+            <td><button class="btn btn-secondary btn-sm" onclick="PH.copy('${PH.esc(r.computed_hash)}','Hash')">
+              <i class="fa-solid fa-copy"></i> Copy
+            </button></td>
+          </tr>
+        </tbody>
+      </table>
+
+      ${!r.match ? `
+        <div style="margin-top:16px;padding:14px;background:rgba(255,59,92,0.08);border:1px solid rgba(255,59,92,0.25);border-radius:8px;font-size:13px">
+          <strong style="color:var(--red)">⚠ Integrity check failed.</strong>
+          <span style="color:var(--text-mid)"> The file differs from the known-good hash.
+          Possible causes: corrupted download, modified/tampered file, or wrong hash pasted.</span>
+        </div>` : `
+        <div style="margin-top:16px;padding:14px;background:rgba(0,255,136,0.06);border:1px solid rgba(0,255,136,0.2);border-radius:8px;font-size:13px">
+          <strong style="color:var(--green)">✓ File is intact.</strong>
+          <span style="color:var(--text-mid)"> The computed hash matches the known-good hash exactly.</span>
+        </div>`}
+    </div>`;
+}
+</script>
+{% endblock %}

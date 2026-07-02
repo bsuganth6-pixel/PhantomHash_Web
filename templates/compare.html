@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Compare Files — PhantomHash{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="card-title"><i class="fa-solid fa-code-compare"></i> Compare Two Files</div>
+  <p style="color:var(--text-mid);font-size:13px;margin-bottom:20px">
+    Upload two files to check if they are bit-for-bit identical. Uses SHA-256 as the comparison algorithm.
+    Useful for verifying downloads, backups, or detecting tampering.
+  </p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div>
+      <label style="margin-bottom:8px;display:block">File A</label>
+      <div class="drop-zone" id="zoneA">
+        <input type="file" id="fileA">
+        <div id="labelA">
+          <div class="drop-icon"><i class="fa-solid fa-file"></i></div>
+          <div class="drop-label"><strong>File A</strong></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <label style="margin-bottom:8px;display:block">File B</label>
+      <div class="drop-zone" id="zoneB">
+        <input type="file" id="fileB">
+        <div id="labelB">
+          <div class="drop-icon"><i class="fa-solid fa-file"></i></div>
+          <div class="drop-label"><strong>File B</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn btn-primary" id="compareBtn" onclick="compareFiles()">
+      <i class="fa-solid fa-code-compare"></i> Compare Files
+    </button>
+    <div class="loader" id="compareLoader"><div class="spinner"></div> Computing SHA-256 for both files…</div>
+  </div>
+</div>
+
+<div id="results"></div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+PH.initDropZone("zoneA", "fileA", "labelA");
+PH.initDropZone("zoneB", "fileB", "labelB");
+
+async function compareFiles() {
+  const a = document.getElementById("fileA");
+  const b = document.getElementById("fileB");
+  if (!a.files.length || !b.files.length) { PH.toast("Select both files first.", "error"); return; }
+
+  const btn = document.getElementById("compareBtn");
+  const loader = document.getElementById("compareLoader");
+  PH.setLoading(loader, btn, true);
+
+  const fd = new FormData();
+  fd.append("file_a", a.files[0]);
+  fd.append("file_b", b.files[0]);
+
+  const r = await PH.postForm("/api/compare", fd);
+  PH.setLoading(loader, btn, false);
+
+  if (r.error) { PH.toast(r.error, "error"); return; }
+  render(r);
+}
+
+function render(r) {
+  const cls = r.identical ? "match" : "mismatch";
+  const icon = r.identical ? "circle-check" : "circle-xmark";
+  const iconColor = r.identical ? "var(--green)" : "var(--red)";
+  const verdictColor = r.identical ? "var(--green)" : "var(--red)";
+
+  const sideA = r.file_a;
+  const sideB = r.file_b;
+
+  const rowClass = (va, vb) => va === vb
+    ? "color:var(--green)"
+    : "color:var(--red)";
+
+  document.getElementById("results").innerHTML = `
+    <div class="card result-block">
+      <div class="verdict-banner ${cls}">
+        <div class="verdict-icon"><i class="fa-solid fa-${icon}" style="color:${iconColor}"></i></div>
+        <div class="verdict-text">
+          <h3 style="color:${verdictColor}">${r.verdict}</h3>
+          <p>${r.identical
+            ? "Both files have the exact same SHA-256 hash — they are bit-for-bit identical."
+            : "SHA-256 hashes differ — these files are NOT identical."}</p>
+        </div>
+      </div>
+
+      <table class="hash-table">
+        <thead>
+          <tr><th>Property</th><th>File A — ${PH.esc(sideA.filename)}</th><th>File B — ${PH.esc(sideB.filename)}</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="algo-name">Size</td>
+            <td style="${rowClass(sideA.size_bytes, sideB.size_bytes)}">${PH.esc(sideA.size_human)}</td>
+            <td style="${rowClass(sideA.size_bytes, sideB.size_bytes)}">${PH.esc(sideB.size_human)}</td>
+          </tr>
+          <tr>
+            <td class="algo-name">File Type</td>
+            <td>${PH.esc(sideA.filetype)}</td>
+            <td>${PH.esc(sideB.filetype)}</td>
+          </tr>
+          <tr>
+            <td class="algo-name">MD5</td>
+            <td class="hash-value" style="font-size:11px;${rowClass(sideA.hashes.md5, sideB.hashes.md5)}">${PH.esc(sideA.hashes.md5)}</td>
+            <td class="hash-value" style="font-size:11px;${rowClass(sideA.hashes.md5, sideB.hashes.md5)}">${PH.esc(sideB.hashes.md5)}</td>
+          </tr>
+          <tr>
+            <td class="algo-name">SHA-256</td>
+            <td class="hash-value" style="font-size:11px;${rowClass(sideA.hashes.sha256, sideB.hashes.sha256)}">${PH.esc(sideA.hashes.sha256)}</td>
+            <td class="hash-value" style="font-size:11px;${rowClass(sideA.hashes.sha256, sideB.hashes.sha256)}">${PH.esc(sideB.hashes.sha256)}</td>
+          </tr>
+          <tr>
+            <td class="algo-name">Entropy</td>
+            <td>${sideA.entropy}</td>
+            <td>${sideB.entropy}</td>
+          </tr>
+          <tr>
+            <td class="algo-name">Modified</td>
+            <td>${PH.esc(sideA.mtime)}</td>
+            <td>${PH.esc(sideB.mtime)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+}
+</script>
+{% endblock %}
